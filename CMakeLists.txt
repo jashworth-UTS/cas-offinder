@@ -5,6 +5,7 @@ set (CAS-OFFinder_VERSION_MAJOR 2)
 set (CAS-OFFinder_VERSION_MINOR 4)
 
 set(CMAKE_BUILD_TYPE Release)
+#set(CMAKE_BUILD_TYPE Debug)
 
 include (CheckIncludeFiles)
 check_include_files (dirent.h HAVE_DIRENT_H)

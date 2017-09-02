@@ -5,6 +5,7 @@
 
 #include <sstream>
 #include <iterator>
+#include <cmath>
 
 using namespace std;
 
@@ -22,23 +23,28 @@ vector<string> split(string const &input, char delim) {
 	return ret;
 }
 
+inline unsigned char Cas_OFFinder::compbase(unsigned char base){
+	if (base == 'A') return 'T';
+	if (base == 'T') return 'A';
+	if (base == 'G') return 'C';
+	if (base == 'C') return 'G';
+	if (base == 'R') return 'Y';
+	if (base == 'Y') return 'R';
+	if (base == 'M') return 'K';
+	if (base == 'K') return 'M';
+	if (base == 'H') return 'D';
+	if (base == 'D') return 'H';
+	if (base == 'B') return 'V';
+	if (base == 'V') return 'B';
+	return base;
+}
+
 void Cas_OFFinder::set_complementary_sequence(cl_char* seq, size_t seqlen) {
 	size_t i, l = 0;
 	cl_char tmp;
 
 	for (i = 0; i < seqlen; i++) {
-		if (seq[i] == 'A') seq[i] = 'T';
-		else if (seq[i] == 'T') seq[i] = 'A';
-		else if (seq[i] == 'G') seq[i] = 'C';
-		else if (seq[i] == 'C') seq[i] = 'G';
-		else if (seq[i] == 'R') seq[i] = 'Y';
-		else if (seq[i] == 'Y') seq[i] = 'R';
-		else if (seq[i] == 'M') seq[i] = 'K';
-		else if (seq[i] == 'K') seq[i] = 'M';
-		else if (seq[i] == 'H') seq[i] = 'D';
-		else if (seq[i] == 'D') seq[i] = 'H';
-		else if (seq[i] == 'B') seq[i] = 'V';
-		else if (seq[i] == 'V') seq[i] = 'B';
+		seq[i] = compbase(seq[i]);
 	}
 	for (i = 0; i < seqlen / 2; i++) {
 		tmp = seq[i];
@@ -70,8 +76,10 @@ void Cas_OFFinder::initOpenCL(vector<int> dev_ids) {
     vector<cl_device_id> devices;
 
 	for (i = 0; i < platform_cnt; i++) {
+			cerr << "platform i" << i << std::endl;
 	    oclGetDeviceIDs(platforms[i], m_devtype, MAX_DEVICE_NUM, found_devices, &device_cnt);
         for (j = 0; j < device_cnt; j++) {
+					cerr << "device j" << j << std::endl;
             if (dev_ids.size() == 0 || (dev_ids.size() > 0 && find(dev_ids.begin(), dev_ids.end(), dev_id) != dev_ids.end()))
                 devices.push_back(found_devices[j]);
             dev_id += 1;
@@ -173,7 +181,7 @@ void Cas_OFFinder::setChrData() {
 			((m_chrdatasize / m_devnum) + ((m_chrdatasize%m_devnum == 0) ? 0 : 1))
 			)
 			); // No more than maximum allocation per device
-		// cerr << "Dicesize: " << m_dicesizes[dev_index] << endl;
+		cerr << "Dicesize: " << m_dicesizes[dev_index] << endl;
 		m_chrdatabufs.push_back(oclCreateBuffer(m_contexts[dev_index], CL_MEM_READ_ONLY, sizeof(cl_char)* (m_dicesizes[dev_index] + m_patternlen - 1), 0));
 		m_flagbufs.push_back(oclCreateBuffer(m_contexts[dev_index], CL_MEM_WRITE_ONLY, sizeof(cl_char)* m_dicesizes[dev_index], 0));
 		m_locibufs.push_back(oclCreateBuffer(m_contexts[dev_index], CL_MEM_WRITE_ONLY, sizeof(cl_uint)* m_dicesizes[dev_index], 0));
@@ -305,6 +313,192 @@ void Cas_OFFinder::indicate_mismatches(cl_char* seq, cl_char* comp) {
 			seq[k] += 32;
 }
 
+void
+Cas_OFFinder::load_pam_scores(string const & infile){
+	string line;
+	vector<string> sline;
+	ifstream fi(infile.c_str(), ios::in);
+	if (!fi.good()){
+		cerr << "file " << infile << " is not good!" << endl;
+		exit(1);
+	}
+	pamscores.clear();
+
+	short const nbaseschecked(2);
+	size_t const arraysize( pow(char_range_+1,nbaseschecked));
+	pamscoresind.resize(arraysize,0);
+
+	unsigned short scoreindex(0);
+	while (getline(fi, line)) {
+		if (line.empty()) continue;
+		sline = split(line);
+		unsigned char p2 = sline[0][0];
+		unsigned char p3 = sline[1][0];
+		if(
+			(unsigned short)p2<cbeg_ ||
+			(unsigned short)p2>cend_ ||
+			(unsigned short)p3<cbeg_ ||
+			(unsigned short)p3>cend_){
+			cerr << "Bad PAM score file input: " << line << endl; exit(1);
+		}
+		float score = atof(sline[2].c_str());
+		// this should be simpler/faster than using implicit/explicit hash functions or nested std::maps (?)
+		unsigned short charind(
+			((unsigned short)p2 - cbeg_) * char_range_ // positon 2 dimension
+			+ (unsigned short)p3 - cbeg_ // position 3 dimension
+		);
+
+#ifdef DEBUG
+		cerr
+			<< "p2 " << p2 << " short is " << short(p2) <<  " - cbeg_ is " << short(p2) - cbeg_
+			<< " p3 " << p3 << " short is " << short(p3) <<  " - cbeg_ is " << short(p3) - cbeg_
+			<< " char_range_ is " << char_range_
+			<< " adj array index " << charind
+			<< " scoreindex " << scoreindex
+			<< endl;
+#endif
+
+		pamscores.push_back(score);
+		pamscoresind[charind] = scoreindex++;
+
+	}
+	fi.close();
+	cerr << "PAM scores loaded from " << infile << endl;
+}
+
+void
+Cas_OFFinder::load_CFD_scores(string const & infile){
+	string line;
+	vector<string> sline;
+	ifstream fi(infile.c_str(), ios::in);
+	if (!fi.good()){
+		cerr << "file " << infile << " is not good!" << endl; exit(1);
+	}
+	// CFD score is for 20 positions. All positions (range 1 to 20) must all be represented in the file.
+	short const npos(20);
+	size_t const arraysize(npos * pow(char_range_+1,2));
+	cerr << "CFD arraysize " << arraysize << endl;
+	cfdscoresind.resize(arraysize,-1);
+
+	// 1.0 default/initialized value corresponds to perfect matches
+	// initialize unspecified mappings: Doench et al. omit complements (score 1) in their data file
+	// note that ALL OTHER LETTERS will get a score of 1.0, i.e. no penalty (e.g. N, Y, R, etc)
+	cfdscores.resize(npos*pow(4,2),1.0); // size is npos * all two-basepair combinations (16)
+
+	unsigned short scoreindex(0);
+	while (getline(fi, line)) {
+		if (line.empty()) break;
+		sline = split(line);
+		unsigned char crRNA = sline[0][0];
+		unsigned char DNA = sline[1][0];
+		unsigned short pos = atoi(sline[2].c_str());
+		// CFD scores are 1-indexed by convention
+		pos-=1;
+		if(pos<0 || pos>19){
+			cerr << "Bad CFD score file input: " << line << endl; exit(1);
+		}
+		float score = atof(sline[3].c_str());
+		if(crRNA=='U') crRNA='T';
+
+		// the Doench scorefiles are expressed as complementary bases,
+		// which is a useful and ideal expression of reality.
+		// however here we convert to identities for speed/efficiency
+		DNA = compbase(DNA);
+
+		if(
+			(unsigned short)crRNA<cbeg_ ||
+			(unsigned short)crRNA>cend_ ||
+			(unsigned short)DNA<cbeg_ ||
+			(unsigned short)DNA>cend_){
+			cerr << "Bad CFD score file input: " << line << endl; exit(1);
+		}
+
+		// simpler/faster than using hash functions or nested std::maps?
+		unsigned short charind = (
+			pos*char_range_*char_range_ // position dimension
+			+ ((unsigned short)crRNA - cbeg_) * char_range_ // crRNA dimension
+			+  (unsigned short)DNA - cbeg_ // DNA dimension
+		);
+
+#ifdef DEBUG
+		cerr
+			<< "p2 " << p2 << " short is " << short(p2) <<  " - cbeg_ is " << short(p2) - cbeg_
+			<< " p3 " << p3 << " short is " << short(p3) <<  " - cbeg_ is " << short(p3) - cbeg_
+			<< " char_range_ is " << char_range_
+			<< " adj array index " << charind
+			<< " scoreindex " << scoreindex
+			<< endl;
+#endif
+
+		cfdscores[scoreindex]=score;
+		cfdscoresind[charind] = scoreindex++;
+	}
+	fi.close();
+
+	// initialize unspecified mappings: Doench et al. omit complements (score 1) in their data file
+	// note that ALL OTHER LETTERS will get a score of 1.0, i.e. no penalty (e.g. N, Y, R, etc)
+	unsigned char bases[] = {'A','C','G','T'};
+	for(short pos(0); pos<npos; ++pos){
+		for(short j(0); j<4; ++j){
+			for(short k(0); k<4; ++k){
+				unsigned short charind(
+					pos*char_range_*char_range_ // position dimension
+					+ ((unsigned short)(bases[j]) - cbeg_) * char_range_ // crRNA dimension
+					+  (unsigned short)(bases[k]) - cbeg_ // DNA dimension
+				);
+				if(cfdscoresind[charind]!=-1) continue;
+				cfdscores[scoreindex] = 1.0;
+				cfdscoresind[charind] = scoreindex++;
+			}
+		}
+	}
+
+#ifdef DEBUG
+	cerr << "CFD matrix score 1 T T " << cfdscores[ cfdscoresind[
+		0*char_range_*char_range_ // position dimension
+		+ ((unsigned short)'T' - cbeg_) * char_range_ // crRNA dimension
+		+ (unsigned short)'T' - cbeg_ // DNA dimension
+	]] << endl;
+
+	cerr << "CFD matrix score 15 A C " << cfdscores[ cfdscoresind[
+		14*char_range_*char_range_ // position dimension
+		+ ((unsigned short)'A' - cbeg_) * char_range_ // crRNA dimension
+		+ (unsigned short)'C' - cbeg_ // DNA dimension
+	]] << endl;
+#endif
+
+}
+
+// the goal is to get this CFD scoring happening in the multithreads,
+// ideally integrated with the on-the-fly mismatch checking/filtering
+// so that one can use CFD thresholds rather than mismatch thresholds
+// as the primary run-time filter
+float
+Cas_OFFinder::calc_CFD_score(cl_char* seq, cl_char* comp){
+	float score(0);
+
+	score = pamscores[ pamscoresind[
+		( (unsigned short)(seq[m_patternlen-2]) - cbeg_) * char_range_
+		+ (unsigned short)(seq[m_patternlen-1]) - cbeg_
+	] ];
+
+	for (int k(0); k < m_patternlen-3; k++){
+		score *= cfdscores[ cfdscoresind[
+			k*char_range_*char_range_ // position dimension
+			+ ((unsigned short)(comp[k]) - cbeg_) * char_range_ // crRNA dimension
+			+  (unsigned short)(seq[k]) - cbeg_ // DNA dimension
+		]];
+
+#ifdef DEBUG
+		cerr << k << " " << comp[k] << " " << seq[k] << " "
+		<< cfdscores[k][comp[k]][seq[k]] << " "
+		<< pscore << " "
+		<< score << endl;
+#endif
+	}
+	return score;
+}
+
 void Cas_OFFinder::compareAll(const char* outfilename) {
 	unsigned int compcnt, i, j, dev_index;
 	cl_uint zero = 0;
@@ -347,6 +541,7 @@ void Cas_OFFinder::compareAll(const char* outfilename) {
 		unsigned long long localanalyzedsize = 0;
 		unsigned int cnt = 0;
 		unsigned int idx;
+		float cfdscore(0);
 		for (dev_index = 0; dev_index < m_activedevnum; dev_index++) {
 			if (m_locicnts[dev_index] > 0) {
 				oclFinish(m_queues[dev_index]);
@@ -358,13 +553,19 @@ void Cas_OFFinder::compareAll(const char* outfilename) {
 					oclFinish(m_queues[dev_index]);
 					for (i = 0; i < cnt; i++) {
 						loci = m_mmlocis[dev_index][i] + m_lasttotalanalyzedsize + localanalyzedsize;
-						if (m_mmcounts[dev_index][i] <= m_thresholds[compcnt]) {
-							strncpy(strbuf, (char *)(chrdata.c_str() + loci), m_patternlen);
-							if (m_directions[dev_index][i] == '-') set_complementary_sequence((cl_char *)strbuf, m_patternlen);
-							indicate_mismatches((cl_char*)strbuf, (cl_char*)m_compares[compcnt].c_str());
-							for (j = 0; ((j < chrpos.size()) && (loci >= chrpos[j])); j++) idx = j;
-							(*fo) << m_compares[compcnt] << "\t" << chrnames[idx] << "\t" << loci - chrpos[idx] << "\t" << strbuf << "\t" << m_directions[dev_index][i] << "\t" << m_mmcounts[dev_index][i] << endl;
-						}
+
+						strncpy(strbuf, (char *)(chrdata.c_str() + loci), m_patternlen);
+						if (m_directions[dev_index][i] == '-') set_complementary_sequence((cl_char *)strbuf, m_patternlen);
+						// BEFORE mismatch marking
+						// this needs to be farmed out to the OpenCL mulitprocessing queues also because it is the rate-limiting step now (Quad core CPU is only at ~100% instead of 300+%)
+						cfdscore = calc_CFD_score((cl_char*)strbuf, (cl_char*)m_compares[compcnt].c_str());
+						indicate_mismatches((cl_char*)strbuf, (cl_char*)m_compares[compcnt].c_str());
+						for (j = 0; ((j < chrpos.size()) && (loci >= chrpos[j])); j++) idx = j;
+
+						if(cfdscore < scorethresholds[compcnt] && m_mmcounts[dev_index][i] > 3) continue;
+						//if (m_mmcounts[dev_index][i] > m_thresholds[compcnt]) continue;
+
+						(*fo) << m_compares[compcnt] << "\t" << chrnames[idx] << "\t" << loci - chrpos[idx] << "\t" << strbuf << "\t" << m_directions[dev_index][i] << "\t" << m_mmcounts[dev_index][i] << "\t" << cfdscore << endl;
 					}
 				}
 			}
@@ -436,9 +637,14 @@ void Cas_OFFinder::readInputFile(const char* inputfile) {
 	vector<string> sline;
 	cl_uint zero = 0;
 
+	// setting some class variables now for later character-based indexing (fast lookups for pam and CFD scoring)
+	cbeg_ = 'A';
+	cend_ = 'Z';
+	char_range_ = cend_ - cbeg_;
+
 	ifstream fi(inputfile, ios::in);
 	if (!fi.good()) {
-		exit(0);
+		exit(1);
 	}
 
 	if (!fi.eof())
@@ -460,26 +666,27 @@ void Cas_OFFinder::readInputFile(const char* inputfile) {
 		transform(sline[0].begin(), sline[0].end(), sline[0].begin(), ::toupper);
 		m_compares.push_back(sline[0]);
 		m_thresholds.push_back(atoi(sline[1].c_str()));
+		scorethresholds.push_back(atof(sline[2].c_str()));
 	}
 	fi.close();
 
 	m_totalcompcount = m_thresholds.size();
 	m_patternlen = (cl_uint)(pattern.size());
-	
-	cl_char *cl_pattern = new cl_char[m_patternlen * 2]; 
+
+	cl_char *cl_pattern = new cl_char[m_patternlen * 2];
 	memcpy(cl_pattern, pattern.c_str(), m_patternlen);
 	memcpy(cl_pattern + m_patternlen, pattern.c_str(), m_patternlen);
 	set_complementary_sequence(cl_pattern+m_patternlen, m_patternlen);
 	cl_int *cl_pattern_flags = new cl_int[m_patternlen * 2];
 	set_seq_flags(cl_pattern_flags, cl_pattern, m_patternlen);
 	set_seq_flags(cl_pattern_flags + m_patternlen, cl_pattern + m_patternlen, m_patternlen);
-	
+
 	for (dev_index = 0; dev_index < m_devnum; dev_index++) {
 		m_patternbufs.push_back(oclCreateBuffer(m_contexts[dev_index], CL_MEM_READ_ONLY, sizeof(cl_char) * m_patternlen * 2, 0));
 		m_patternflagbufs.push_back(oclCreateBuffer(m_contexts[dev_index], CL_MEM_READ_ONLY, sizeof(cl_int) * m_patternlen * 2, 0));
 		oclEnqueueWriteBuffer(m_queues[dev_index], m_patternbufs[dev_index], CL_FALSE, 0, sizeof(cl_char) * m_patternlen * 2, cl_pattern, 0, 0, 0);
 		oclEnqueueWriteBuffer(m_queues[dev_index], m_patternflagbufs[dev_index], CL_FALSE, 0, sizeof(cl_int) * m_patternlen * 2, cl_pattern_flags, 0, 0, 0);
-		
+
 		m_comparebufs.push_back(oclCreateBuffer(m_contexts[dev_index], CL_MEM_READ_ONLY, sizeof(cl_char) * m_patternlen * 2, 0));
 		m_compareflagbufs.push_back(oclCreateBuffer(m_contexts[dev_index], CL_MEM_READ_ONLY, sizeof(cl_uint) * m_patternlen * 2, 0));
 

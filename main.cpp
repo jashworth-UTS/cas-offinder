@@ -42,7 +42,7 @@ void run_cas_offinder(Cas_OFFinder &s, const char* chromfilename, const char* ou
 	string filepath = chromfilename;
 
 	cerr << "Reading " << filepath << "..." << endl;
-	
+
 	if (read_fasta(filepath, s.chrnames, s.chrdata, s.chrpos)) {
 		if (read_twobit(filepath, s.chrnames, s.chrdata, s.chrpos)) {
 			cerr << "Skipping non-acceptable file " << filepath << "..." << endl;
@@ -106,6 +106,16 @@ int main(int argc, char *argv[]) {
 	s.readInputFile(argv[1]);
 
 	outfilename = argv[3]; remove(argv[3]);
+
+	if(argc>4){
+		string fi = argv[4];
+		s.load_pam_scores(fi.c_str());
+	}
+
+	if(argc>5){
+		string fi = argv[5];
+		s.load_CFD_scores(fi.c_str());
+	}
 
 	int cnum = 0;
 	if ((dir = opendir(s.chrdir.c_str())) == NULL) {

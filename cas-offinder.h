@@ -1,5 +1,6 @@
 #include "oclkernels.h"
 
+#include <map>
 #include <vector>
 #include <string>
 #include <cstring>
@@ -21,6 +22,10 @@ using namespace std;
 static cl_platform_id platforms[MAX_PLATFORM_NUM];
 static cl_uint platform_cnt;
 
+typedef map<char,float> BaseScore;
+typedef map<char,BaseScore> BaseScores;
+typedef map<int, BaseScores> SiteScores;
+
 class Cas_OFFinder {
 private:
     cl_device_type m_devtype;
@@ -32,6 +37,17 @@ private:
 
 	unsigned long long m_chrdatasize;
 	vector<string> m_chrnames;
+
+	cl_uchar cbeg_;
+	cl_uchar cend_;
+	cl_ushort char_range_;
+	vector<cl_float> pamscores;
+	vector<cl_short> pamscoresind;
+	vector<cl_float> cfdscores;
+	vector<cl_short> cfdscoresind;
+	vector<cl_float> sitescores;
+	vector<cl_float> scorethresholds;
+
 	vector<string> m_compares;
 	vector<cl_ushort> m_thresholds;
 	vector<unsigned long long> m_chrpos;
@@ -99,10 +115,14 @@ public:
 	void releaseLociinfo();
 
 	void indicate_mismatches(cl_char* seq, cl_char* comp);
+	float calc_CFD_score(cl_char* seq, cl_char* comp);
 
 	void compareAll(const char* outfilename);
 	void readInputFile(const char* inputfile);
+	void load_pam_scores(string const & infile);
+	void load_CFD_scores(string const & infile);
 
 	static void print_usage();
 	static void init_platforms();
+	inline unsigned char compbase(unsigned char);
 };
