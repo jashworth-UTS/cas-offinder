@@ -112,6 +112,7 @@ void Cas_OFFinder::initOpenCL(vector<int> dev_ids) {
 		m_queues.push_back(oclCreateCommandQueue(m_contexts[i], devices[i], 0));
 		MAX_ALLOC_MEMORY.push_back(0);
 		oclGetDeviceInfo(devices[i], CL_DEVICE_MAX_MEM_ALLOC_SIZE, sizeof(cl_ulong), &MAX_ALLOC_MEMORY[i], 0);
+		cerr << "devnum " << i << " MAX_ALLOC_MEMORY " << MAX_ALLOC_MEMORY[i] << endl;
 	}
 	delete[] found_devices;
 	cerr << "Total " << m_devnum << " device(s) found." << endl;
@@ -159,6 +160,11 @@ Cas_OFFinder::~Cas_OFFinder() {
 	clearbufvec(&m_comparebufs);
 	clearbufvec(&m_compareflagbufs);
 	clearbufvec(&m_entrycountbufs);
+
+	clearbufvec(&m_pamscoresbufs);
+	clearbufvec(&m_pamscoresindbufs);
+	clearbufvec(&m_cfdscoresbufs);
+	clearbufvec(&m_cfdscoresindbufs);
 }
 
 void Cas_OFFinder::setChrData() {
@@ -175,12 +181,20 @@ void Cas_OFFinder::setChrData() {
 	clearbufvec(&m_locibufs);
 
 	for (dev_index = 0; dev_index < m_devnum; dev_index++) {
-		m_dicesizes.push_back(
-			(size_t)MIN(
-			(MAX_ALLOC_MEMORY[dev_index] - sizeof(cl_char)* (3 * m_patternlen - 1) - sizeof(cl_uint)* (2 * m_patternlen + 3) - sizeof(cl_ushort)) / (4 * sizeof(cl_char) + 3 * sizeof(cl_uint) + 2 * sizeof(cl_ushort)),
-			((m_chrdatasize / m_devnum) + ((m_chrdatasize%m_devnum == 0) ? 0 : 1))
-			)
-			); // No more than maximum allocation per device
+		// I'm still trying to trace exactly is going on here with dicesize determination/impacts/importance
+		// subdevice will have access to several shared memory buffers (will they be copied over and require space?)
+		// subdevice function calls may also allocate local memory for local variables
+		// I guess this is about dividing things up into chunks the devices can handle (still not following it though)
+		size_t dicesize1 =
+			(MAX_ALLOC_MEMORY[dev_index] - sizeof(cl_char)* (3 * m_patternlen - 1)
+				- sizeof(cl_uint)* (2 * m_patternlen + 3) - sizeof(cl_ushort))
+			/
+				(4 * sizeof(cl_char) + 3 * sizeof(cl_uint) + 2 * sizeof(cl_ushort));
+
+		size_t dicesize2 = (m_chrdatasize / m_devnum) + ((m_chrdatasize%m_devnum == 0) ? 0 : 1);
+		size_t dicesize = (size_t)MIN( dicesize1, dicesize2 );
+		cerr << "dicesize1 " << dicesize1 << " dicesize2 " << dicesize2 << endl;
+		m_dicesizes.push_back( dicesize ); // No more than maximum allocation per device
 		cerr << "Dicesize: " << m_dicesizes[dev_index] << endl;
 		m_chrdatabufs.push_back(oclCreateBuffer(m_contexts[dev_index], CL_MEM_READ_ONLY, sizeof(cl_char)* (m_dicesizes[dev_index] + m_patternlen - 1), 0));
 		m_flagbufs.push_back(oclCreateBuffer(m_contexts[dev_index], CL_MEM_WRITE_ONLY, sizeof(cl_char)* m_dicesizes[dev_index], 0));
@@ -253,22 +267,27 @@ void Cas_OFFinder::findPattern() {
 			m_mmcounts.push_back((cl_ushort *)malloc(sizeof(cl_ushort)* m_locicnts[dev_index] * 2)); // Maximum numbers of mismatch counts
 			m_directions.push_back((cl_char *)malloc(sizeof(cl_char)* m_locicnts[dev_index] * 2));
 			m_mmlocis.push_back((cl_uint *)malloc(sizeof(cl_uint)* m_locicnts[dev_index] * 2));
+			m_sitescores.push_back((cl_float *)malloc(sizeof(cl_float)* m_locicnts[dev_index] * 2));
 
 			m_mmlocibufs.push_back(oclCreateBuffer(m_contexts[dev_index], CL_MEM_WRITE_ONLY, sizeof(cl_uint)* m_locicnts[dev_index] * 2, 0));
 			m_mmcountbufs.push_back(oclCreateBuffer(m_contexts[dev_index], CL_MEM_WRITE_ONLY, sizeof(cl_ushort)* m_locicnts[dev_index] * 2, 0));
 			m_directionbufs.push_back(oclCreateBuffer(m_contexts[dev_index], CL_MEM_WRITE_ONLY, sizeof(cl_char)* m_locicnts[dev_index] * 2, 0));
+			m_sitescorebufs.push_back(oclCreateBuffer(m_contexts[dev_index], CL_MEM_READ_WRITE, sizeof(cl_float)* m_locicnts[dev_index] * 2, 0));
 
 			oclSetKernelArg(m_comparerkernels[dev_index], 2, sizeof(cl_mem), &m_mmlocibufs[dev_index]);
 			oclSetKernelArg(m_comparerkernels[dev_index], 8, sizeof(cl_mem), &m_mmcountbufs[dev_index]);
 			oclSetKernelArg(m_comparerkernels[dev_index], 9, sizeof(cl_mem), &m_directionbufs[dev_index]);
+			oclSetKernelArg(m_comparerkernels[dev_index], 16, sizeof(cl_mem), &m_sitescorebufs[dev_index]);
 		}
 		else {
 			m_flags.push_back(0);
 			m_mmcounts.push_back(0);
+			m_sitescores.push_back(0);
 			m_directions.push_back(0);
 			m_mmlocis.push_back(0);
 			m_mmlocibufs.push_back(0);
 			m_mmcountbufs.push_back(0);
+			m_sitescorebufs.push_back(0);
 			m_directionbufs.push_back(0);
 		}
 	}
@@ -282,15 +301,18 @@ void Cas_OFFinder::releaseLociinfo() {
 		free((void *)m_flags[dev_index]);
 		free((void *)m_directions[dev_index]);
 		free((void *)m_mmlocis[dev_index]);
+		free((void *)m_sitescores[dev_index]);
 	}
 	m_directions.clear();
 	m_mmlocis.clear();
 	m_mmcounts.clear();
 	m_locicnts.clear();
+	m_sitescores.clear();
 	clearbufvec(&m_mmlocibufs);
 	m_flags.clear();
 	clearbufvec(&m_mmcountbufs);
 	clearbufvec(&m_directionbufs);
+	clearbufvec(&m_sitescorebufs);
 }
 
 void Cas_OFFinder::indicate_mismatches(cl_char* seq, cl_char* comp) {
@@ -315,6 +337,14 @@ void Cas_OFFinder::indicate_mismatches(cl_char* seq, cl_char* comp) {
 
 void
 Cas_OFFinder::load_pam_scores(string const & infile){
+
+	// setting some class variables now for later character-based indexing (fast lookups for pam and CFD scoring)
+	cbeg_ = 'A';
+	cend_ = 'Z';
+	char_range_ = cend_ - cbeg_;
+	nbases_ = 4;
+	pamlen_ = 2;
+
 	string line;
 	vector<string> sline;
 	ifstream fi(infile.c_str(), ios::in);
@@ -322,11 +352,14 @@ Cas_OFFinder::load_pam_scores(string const & infile){
 		cerr << "file " << infile << " is not good!" << endl;
 		exit(1);
 	}
-	pamscores.clear();
 
-	short const nbaseschecked(2);
-	size_t const arraysize( pow(char_range_+1,nbaseschecked));
-	pamscoresind.resize(arraysize,0);
+	size_t const arraylen(pow(nbases_,pamlen_));
+	pamscores.resize(arraylen,0);
+	cerr << "PAM scores (cl_float) arraylen " << arraylen << " arraysize " << sizeof(cl_float)*arraylen << endl;
+
+	size_t const arrayleninds(pow(char_range_+1,pamlen_));
+	pamscoresind.resize(arrayleninds,0);
+	cerr << "PAM scores indexing (cl_short) arraylen " << arrayleninds << " arraysize " << sizeof(cl_short)*arrayleninds << endl;
 
 	unsigned short scoreindex(0);
 	while (getline(fi, line)) {
@@ -358,7 +391,7 @@ Cas_OFFinder::load_pam_scores(string const & infile){
 			<< endl;
 #endif
 
-		pamscores.push_back(score);
+		pamscores[scoreindex] = score;
 		pamscoresind[charind] = scoreindex++;
 
 	}
@@ -368,22 +401,31 @@ Cas_OFFinder::load_pam_scores(string const & infile){
 
 void
 Cas_OFFinder::load_CFD_scores(string const & infile){
+
+	// setting some class variables now for later character-based indexing (fast lookups for pam and CFD scoring)
+	cbeg_ = 'A';
+	cend_ = 'Z';
+	char_range_ = cend_ - cbeg_;
+	nbases_ = 4;
+	cfdlen_ = 20;
+
 	string line;
 	vector<string> sline;
 	ifstream fi(infile.c_str(), ios::in);
 	if (!fi.good()){
 		cerr << "file " << infile << " is not good!" << endl; exit(1);
 	}
-	// CFD score is for 20 positions. All positions (range 1 to 20) must all be represented in the file.
-	short const npos(20);
-	size_t const arraysize(npos * pow(char_range_+1,2));
-	cerr << "CFD arraysize " << arraysize << endl;
-	cfdscoresind.resize(arraysize,-1);
 
 	// 1.0 default/initialized value corresponds to perfect matches
 	// initialize unspecified mappings: Doench et al. omit complements (score 1) in their data file
 	// note that ALL OTHER LETTERS will get a score of 1.0, i.e. no penalty (e.g. N, Y, R, etc)
-	cfdscores.resize(npos*pow(4,2),1.0); // size is npos * all two-basepair combinations (16)
+	size_t const arraylen(cfdlen_*pow(nbases_,2)); // size is cfdlen_ * all two-basepair combinations (16)
+	cfdscores.resize(arraylen,1.0);
+	cerr << "CFD scores (cl_float) arraylen " << arraylen << " arraysize " << sizeof(cl_float)*arraylen << endl;
+
+	size_t const arrayleninds(cfdlen_ * pow(char_range_+1,2));
+	cerr << "CFD indexing (cl_short) arraylen " << arrayleninds << " arraysize " << sizeof(cl_short)*arrayleninds << endl;
+	cfdscoresind.resize(arrayleninds,-1);
 
 	unsigned short scoreindex(0);
 	while (getline(fi, line)) {
@@ -394,7 +436,7 @@ Cas_OFFinder::load_CFD_scores(string const & infile){
 		unsigned short pos = atoi(sline[2].c_str());
 		// CFD scores are 1-indexed by convention
 		pos-=1;
-		if(pos<0 || pos>19){
+		if(pos<0 || pos>=cfdlen_){
 			cerr << "Bad CFD score file input: " << line << endl; exit(1);
 		}
 		float score = atof(sline[3].c_str());
@@ -438,7 +480,7 @@ Cas_OFFinder::load_CFD_scores(string const & infile){
 	// initialize unspecified mappings: Doench et al. omit complements (score 1) in their data file
 	// note that ALL OTHER LETTERS will get a score of 1.0, i.e. no penalty (e.g. N, Y, R, etc)
 	unsigned char bases[] = {'A','C','G','T'};
-	for(short pos(0); pos<npos; ++pos){
+	for(short pos(0); pos<cfdlen_; ++pos){
 		for(short j(0); j<4; ++j){
 			for(short k(0); k<4; ++k){
 				unsigned short charind(
@@ -473,6 +515,7 @@ Cas_OFFinder::load_CFD_scores(string const & infile){
 // ideally integrated with the on-the-fly mismatch checking/filtering
 // so that one can use CFD thresholds rather than mismatch thresholds
 // as the primary run-time filter
+// update: this function has subsequently also been implemented in the OpenCL comparer parallel code
 float
 Cas_OFFinder::calc_CFD_score(cl_char* seq, cl_char* comp){
 	float score(0);
@@ -516,15 +559,18 @@ void Cas_OFFinder::compareAll(const char* outfilename) {
 		set_seq_flags(cl_compare_flags + m_patternlen, cl_compare + m_patternlen, m_patternlen);
 
 		for (dev_index = 0; dev_index < m_activedevnum; dev_index++) {
-			if (m_locicnts[dev_index] > 0) {
-				oclEnqueueWriteBuffer(m_queues[dev_index], m_comparebufs[dev_index], CL_FALSE, 0, sizeof(cl_char) * m_patternlen * 2, cl_compare, 0, 0, 0);
-				oclEnqueueWriteBuffer(m_queues[dev_index], m_compareflagbufs[dev_index], CL_FALSE, 0, sizeof(cl_int) * m_patternlen * 2, cl_compare_flags, 0, 0, 0);
-				oclEnqueueWriteBuffer(m_queues[dev_index], m_entrycountbufs[dev_index], CL_FALSE, 0, sizeof(cl_uint), &zero, 0, 0, 0);
-				oclFinish(m_queues[dev_index]);
-				oclSetKernelArg(m_comparerkernels[dev_index], 6, sizeof(cl_ushort), &m_thresholds[compcnt]);
-				const size_t locicnts = m_locicnts[dev_index];
-				oclEnqueueNDRangeKernel(m_queues[dev_index], m_comparerkernels[dev_index], 1, 0, &locicnts, 0, 0, 0, 0);
-			}
+			if (m_locicnts[dev_index] <= 0) continue;
+			oclEnqueueWriteBuffer(m_queues[dev_index], m_comparebufs[dev_index], CL_FALSE, 0, sizeof(cl_char) * m_patternlen * 2, cl_compare, 0, 0, 0);
+			oclEnqueueWriteBuffer(m_queues[dev_index], m_compareflagbufs[dev_index], CL_FALSE, 0, sizeof(cl_int) * m_patternlen * 2, cl_compare_flags, 0, 0, 0);
+			oclEnqueueWriteBuffer(m_queues[dev_index], m_entrycountbufs[dev_index], CL_FALSE, 0, sizeof(cl_uint), &zero, 0, 0, 0);
+
+			oclFinish(m_queues[dev_index]);
+
+			oclSetKernelArg(m_comparerkernels[dev_index], 6, sizeof(cl_ushort), &m_thresholds[compcnt]);
+			oclSetKernelArg(m_comparerkernels[dev_index], 15, sizeof(cl_float), &m_scorethresholds[compcnt]);
+
+			const size_t locicnts = m_locicnts[dev_index];
+			oclEnqueueNDRangeKernel(m_queues[dev_index], m_comparerkernels[dev_index], 1, 0, &locicnts, 0, 0, 0, 0);
 		}
 
 		unsigned long long loci;
@@ -541,7 +587,7 @@ void Cas_OFFinder::compareAll(const char* outfilename) {
 		unsigned long long localanalyzedsize = 0;
 		unsigned int cnt = 0;
 		unsigned int idx;
-		float cfdscore(0);
+//		float cfdscore(0);
 		for (dev_index = 0; dev_index < m_activedevnum; dev_index++) {
 			if (m_locicnts[dev_index] > 0) {
 				oclFinish(m_queues[dev_index]);
@@ -550,22 +596,29 @@ void Cas_OFFinder::compareAll(const char* outfilename) {
 					oclEnqueueReadBuffer(m_queues[dev_index], m_mmcountbufs[dev_index], CL_FALSE, 0, sizeof(cl_ushort)* cnt, m_mmcounts[dev_index], 0, 0, 0);
 					oclEnqueueReadBuffer(m_queues[dev_index], m_directionbufs[dev_index], CL_FALSE, 0, sizeof(cl_char)* cnt, m_directions[dev_index], 0, 0, 0);
 					oclEnqueueReadBuffer(m_queues[dev_index], m_mmlocibufs[dev_index], CL_FALSE, 0, sizeof(cl_uint)* cnt, m_mmlocis[dev_index], 0, 0, 0);
+					oclEnqueueReadBuffer(m_queues[dev_index], m_sitescorebufs[dev_index], CL_FALSE, 0, sizeof(cl_float)* cnt, m_sitescores[dev_index], 0, 0, 0);
 					oclFinish(m_queues[dev_index]);
 					for (i = 0; i < cnt; i++) {
 						loci = m_mmlocis[dev_index][i] + m_lasttotalanalyzedsize + localanalyzedsize;
 
 						strncpy(strbuf, (char *)(chrdata.c_str() + loci), m_patternlen);
 						if (m_directions[dev_index][i] == '-') set_complementary_sequence((cl_char *)strbuf, m_patternlen);
-						// BEFORE mismatch marking
-						// this needs to be farmed out to the OpenCL mulitprocessing queues also because it is the rate-limiting step now (Quad core CPU is only at ~100% instead of 300+%)
-						cfdscore = calc_CFD_score((cl_char*)strbuf, (cl_char*)m_compares[compcnt].c_str());
+// this is now done in the OpenCL comparer code
+//						cfdscore = calc_CFD_score((cl_char*)strbuf, (cl_char*)m_compares[compcnt].c_str());
 						indicate_mismatches((cl_char*)strbuf, (cl_char*)m_compares[compcnt].c_str());
 						for (j = 0; ((j < chrpos.size()) && (loci >= chrpos[j])); j++) idx = j;
 
-						if(cfdscore < scorethresholds[compcnt] && m_mmcounts[dev_index][i] > 3) continue;
+						if(m_sitescores[dev_index][i] < m_scorethresholds[compcnt] && m_mmcounts[dev_index][i] > 4) continue;
 						//if (m_mmcounts[dev_index][i] > m_thresholds[compcnt]) continue;
 
-						(*fo) << m_compares[compcnt] << "\t" << chrnames[idx] << "\t" << loci - chrpos[idx] << "\t" << strbuf << "\t" << m_directions[dev_index][i] << "\t" << m_mmcounts[dev_index][i] << "\t" << cfdscore << endl;
+						(*fo) << m_compares[compcnt]
+							<< '\t' << chrnames[idx]
+							<< '\t' << loci - chrpos[idx]
+							<< '\t' << strbuf
+							<< '\t' << m_directions[dev_index][i]
+							<< '\t' << m_mmcounts[dev_index][i]
+							<< '\t' << m_sitescores[dev_index][i]
+							<< endl;
 					}
 				}
 			}
@@ -637,11 +690,6 @@ void Cas_OFFinder::readInputFile(const char* inputfile) {
 	vector<string> sline;
 	cl_uint zero = 0;
 
-	// setting some class variables now for later character-based indexing (fast lookups for pam and CFD scoring)
-	cbeg_ = 'A';
-	cend_ = 'Z';
-	char_range_ = cend_ - cbeg_;
-
 	ifstream fi(inputfile, ios::in);
 	if (!fi.good()) {
 		exit(1);
@@ -666,7 +714,7 @@ void Cas_OFFinder::readInputFile(const char* inputfile) {
 		transform(sline[0].begin(), sline[0].end(), sline[0].begin(), ::toupper);
 		m_compares.push_back(sline[0]);
 		m_thresholds.push_back(atoi(sline[1].c_str()));
-		scorethresholds.push_back(atof(sline[2].c_str()));
+		m_scorethresholds.push_back(atof(sline[2].c_str()));
 	}
 	fi.close();
 
@@ -694,6 +742,16 @@ void Cas_OFFinder::readInputFile(const char* inputfile) {
 		oclEnqueueWriteBuffer(m_queues[dev_index], m_entrycountbufs[dev_index], CL_FALSE, 0, sizeof(cl_uint), &zero, 0, 0, 0);
 		oclFinish(m_queues[dev_index]);
 
+//		cerr << pamscores.size() << " " << cfdscores.size() << " " << pamscoresind.size() << " " << cfdscoresind.size() << endl;
+		m_pamscoresbufs.push_back(   oclCreateBuffer(m_contexts[dev_index], CL_MEM_READ_WRITE, sizeof(cl_float) * pamscores.size(), 0));
+		m_cfdscoresbufs.push_back(   oclCreateBuffer(m_contexts[dev_index], CL_MEM_READ_WRITE, sizeof(cl_float) * cfdscores.size(), 0));
+		m_pamscoresindbufs.push_back(oclCreateBuffer(m_contexts[dev_index], CL_MEM_READ_WRITE, sizeof(cl_short) * pamscoresind.size(), 0));
+		m_cfdscoresindbufs.push_back(oclCreateBuffer(m_contexts[dev_index], CL_MEM_READ_WRITE, sizeof(cl_short) * cfdscoresind.size(), 0));
+		oclEnqueueWriteBuffer(m_queues[dev_index],   m_pamscoresbufs[dev_index],CL_FALSE,0,sizeof(cl_float)*pamscores.size(),&pamscores.at(0),0,0,0);
+		oclEnqueueWriteBuffer(m_queues[dev_index],   m_cfdscoresbufs[dev_index],CL_FALSE,0,sizeof(cl_float)*cfdscores.size(),&cfdscores.at(0),0,0,0);
+		oclEnqueueWriteBuffer(m_queues[dev_index],m_pamscoresindbufs[dev_index],CL_FALSE,0,sizeof(cl_short)*pamscoresind.size(),&pamscoresind.at(0),0,0,0);
+		oclEnqueueWriteBuffer(m_queues[dev_index],m_cfdscoresindbufs[dev_index],CL_FALSE,0,sizeof(cl_short)*cfdscoresind.size(),&cfdscoresind.at(0),0,0,0);
+
 		oclSetKernelArg(m_finderkernels[dev_index], 1, sizeof(cl_mem), &m_patternbufs[dev_index]);
 		oclSetKernelArg(m_finderkernels[dev_index], 2, sizeof(cl_mem), &m_patternflagbufs[dev_index]);
 		oclSetKernelArg(m_finderkernels[dev_index], 3, sizeof(cl_uint), &m_patternlen);
@@ -704,13 +762,18 @@ void Cas_OFFinder::readInputFile(const char* inputfile) {
 		oclSetKernelArg(m_comparerkernels[dev_index], 5, sizeof(cl_uint), &m_patternlen);
 		oclSetKernelArg(m_comparerkernels[dev_index], 10, sizeof(cl_mem), &m_entrycountbufs[dev_index]);
 
-        if (m_devtype != CL_DEVICE_TYPE_CPU) {
-            oclSetKernelArg(m_finderkernels[dev_index], 7, sizeof(cl_char) * m_patternlen * 2, 0);
-            oclSetKernelArg(m_finderkernels[dev_index], 8, sizeof(cl_int) * m_patternlen * 2, 0);
-            oclSetKernelArg(m_comparerkernels[dev_index], 11, sizeof(cl_char) * m_patternlen * 2, 0);
-            oclSetKernelArg(m_comparerkernels[dev_index], 12, sizeof(cl_int) * m_patternlen * 2, 0);
-        }
+		oclSetKernelArg(m_comparerkernels[dev_index], 11, sizeof(cl_mem), &m_pamscoresbufs[dev_index]);
+		oclSetKernelArg(m_comparerkernels[dev_index], 12, sizeof(cl_mem), &m_pamscoresindbufs[dev_index]);
+		oclSetKernelArg(m_comparerkernels[dev_index], 13, sizeof(cl_mem), &m_cfdscoresbufs[dev_index]);
+		oclSetKernelArg(m_comparerkernels[dev_index], 14, sizeof(cl_mem), &m_cfdscoresindbufs[dev_index]);
+
+    if (m_devtype != CL_DEVICE_TYPE_CPU) {
+        oclSetKernelArg(m_finderkernels[dev_index], 7, sizeof(cl_char) * m_patternlen * 2, 0);
+        oclSetKernelArg(m_finderkernels[dev_index], 8, sizeof(cl_int) * m_patternlen * 2, 0);
+        oclSetKernelArg(m_comparerkernels[dev_index], 17, sizeof(cl_char) * m_patternlen * 2, 0);
+        oclSetKernelArg(m_comparerkernels[dev_index], 18, sizeof(cl_int) * m_patternlen * 2, 0);
     }
+  }
 
 	delete[] cl_pattern;
 	delete[] cl_pattern_flags;

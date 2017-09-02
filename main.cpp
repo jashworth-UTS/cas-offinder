@@ -19,7 +19,7 @@
 #include <cstdlib>
 #include <cstdarg>
 
-//#define DEBUG
+#define DEBUG
 
 using namespace std;
 
@@ -102,9 +102,6 @@ int main(int argc, char *argv[]) {
     string devarg = argv[2]+1;
 	Cas_OFFinder s(devtype, devarg);
 
-	cerr << "Loading input file..." << endl;
-	s.readInputFile(argv[1]);
-
 	outfilename = argv[3]; remove(argv[3]);
 
 	if(argc>4){
@@ -116,6 +113,9 @@ int main(int argc, char *argv[]) {
 		string fi = argv[5];
 		s.load_CFD_scores(fi.c_str());
 	}
+
+	cerr << "Loading input file..." << endl;
+	s.readInputFile(argv[1]);
 
 	int cnum = 0;
 	if ((dir = opendir(s.chrdir.c_str())) == NULL) {
