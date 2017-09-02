@@ -1,6 +1,16 @@
-Cas-OFFinder
+Cas-OFFinder-CFD
 ==================================
 
+Note (Justin Ashworth 2017):
+This is an upgraded variant of Cas-OFFinder which implements the CFD scoring matrix of Doench et al. 2016 (doi:10.1038/nbt.3437) in a tricky but very fast way to perform 'ultrafast' CFD-based site screening with much higher mismatch limits. The CFD speed-up I've painstakingly added here seems to be about 50-fold faster for high-mismatch searches (8 to 16 :) for several hundred sites (CFD scoring cutoff of 0.2 as suggested by the paper)
+
+This only supports Cas9-based searches using 20bp crRNA + 3bp PAM sites right now
+This does not currently support anything but CPU devices
+
+Two scoring files are included from Doench et al. 2016: pam_scores.tsv and cfd_mismatch_scores.tsv. These should be supplied as arguments.
+There is also an example of an altered targetsites file which includes a column for CFD scoring thresholds.
+
+*Original README:*
 Cas-OFFinder is OpenCL based, ultrafast and versatile program
 that searches for potential off-target sites of CRISPR/Cas-derived RNA-guided endonucleases (RGEN).
 
@@ -25,7 +35,7 @@ RGENs consist of two parts.
   - Dual RNA components comprising sequence-invariant tracrRNA and sequence-variable guide RNA termed crRNA
   - ...or single-chain guide RNA (sgRNA) constructed by linking essential portions of tracrRNA and crRNA
 * Cas9 Protein
-  - A fixed protein component that recognizes the protospacer adjacent motif (PAM) downstream of target 
+  - A fixed protein component that recognizes the protospacer adjacent motif (PAM) downstream of target
     DNA sequences corresponding to guide RNA.
 
 PAM sites:
@@ -38,7 +48,7 @@ Usage
 -------
 
 Cas-OFFinder can run with:
-  
+
     cas-offinder {input_file} {G|C|A}[device_id(s)] {output_file}
 
 G stands for using GPU devices, C for using CPUs, and A for using accelerators.
@@ -55,7 +65,7 @@ First, download any target organism's chromosome FASTA files. You can find one i
 Extract all FASTA files in a directory.
 
 For example (human chromosomes, in POSIX environment):
-    
+
     $> wget http://hgdownload.soe.ucsc.edu/goldenPath/hg19/bigZips/chromFa.tar.gz
     $> mkdir -p /var/chromosome/human_hg19
     $> tar zxf chromFa.tar.gz -C /var/chromosome/human_hg19
@@ -118,11 +128,11 @@ Also, the number of mismatched bases is not limited!
 
 Following codes are supported:
 
-   A   |    C   |   G   |   T   
+   A   |    C   |   G   |   T
 :-----:|:------:|:-----:|:-----:
 Adenine|Cytosine|Guanine|Thymine
 
-   R  |   Y  |   S  |   W  |   K  |   M  
+   R  |   Y  |   S  |   W  |   K  |   M
 :----:|:----:|:----:|:----:|:----:|:----:
 A or G|C or T|G or C|A or T|G or T|A or C
 
@@ -151,13 +161,13 @@ Optionally, you can set the ID of devices to limit the number of devices used by
 
     $> ./cas-offinder input.txt G1 out.txt
     ...
- 
+
 You can use commas, or colons for setting range:
 
     $> ./cas-offinder input.txt G0,1 out.txt
-    
+
     or
-    
+
     $> ./cas-offinder input.txt G0:2 out.txt
     ...
 
@@ -202,25 +212,25 @@ Installation
 
   OpenCL is supported on various platforms, including many Intel/AMD CPUs and NVidia/AMD graphic cards!
   Before installing Cas-OFFinder, please check whether your device is an OpenCL-supported one.
-  
+
   Khronos group provides an extensive list of supported devices here:
-  
+
   http://www.khronos.org/conformance/adopters/conformant-products/#opencl
 
   Cas-OFFinder usually runs faster on GPUs than CPUs.
   If you want to purchase a new graphic card for fast analyzing speed,
   please check GPU benchmark results below as a reference:
-  
+
   - https://compubench.com/result.jsp
   - http://www.luxrender.net/luxmark/top/top20/Room/GPU/1
 
   Recently, the OpenCL runtime binaries are already shipped with the device drivers in many cases -
   so you don't have to install anything to run Cas-OFFinder.
-  
+
   But if it wasn't, you should download and install a proper OpenCL SDK to install runtime APIs.
   In that case, download an OpenCL SDK among the links below.
   If you know your device's vendor name, it is enough to install only your vendor's one.
-    
+
   - AMD: http://developer.amd.com/tools-and-sdks/heterogeneous-computing/amd-accelerated-parallel-processing-app-sdk/downloads/
   - Intel: http://software.intel.com/en-us/vcsource/tools/opencl-sdk
   - NVidia: https://developer.nvidia.com/cuda-downloads
@@ -234,30 +244,30 @@ Installation
 Compile
 ----------------
   OpenCL library is required to compile Cas-OFFinder.
-  
+
   To support cross-platform compilation on various operating systems,
   CMake build system is used (more informations on http://www.cmake.org).
-  
+
   First, download CMake here (http://www.cmake.org/cmake/resources/software.html).
   If you use Ubuntu linux, you can also install it via apt-get.
   (apt-get install cmake)
 
   Checkout the source code of Cas-OFFinder with Git client,
   or download it manually on github website.
-  
-  
+
+
   In POSIX environment (g++ should be pre-installed), launch terminal and type the following to build Cas-OFFinder:
 
       cmake -G "Unix Makefiles"
       make
-      
+
   On Windows (Visual Studio should be pre-installed), launch 'Visual Studio Command Prompt'
   (You can find it under 'Start menu' - 'Microsoft Visual Studio xxxx' - 'Visual Studio Tools')
   and type the following (Assuming that the CMake binary is installed in 'C:\Program Files (x86)\CMake 2.8\bin'):
-  
+
       "C:\Program Files (x86)\CMake 2.8\bin\cmake.exe" -G "NMake Makefiles"
       nmake
-  
+
   Then cas-offinder binary will be generated. Copy it wherever you want.
 
 Module reference
