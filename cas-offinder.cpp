@@ -642,21 +642,24 @@ void Cas_OFFinder::init_platforms() {
 }
 void Cas_OFFinder::print_usage() {
 	unsigned int i, j;
-	cout << "Cas-OFFinder v2.4 (" << __DATE__ << ")" << endl <<
+		cout << endl << endl <<
+		"*MOD* Cas-OFFinder-CFD (" << __DATE__ << ")" << endl <<
+		" Experimental/Academic (J Ashworth)" << endl <<
 		endl <<
+	cout << "Forked from Cas-OFFinder v2.4" << endl <<
 		"Copyright (c) 2013 Jeongbin Park and Sangsu Bae" << endl <<
 		"Website: http://github.com/snugel/cas-offinder" << endl <<
 		endl <<
-		"Usage: cas-offinder {input_file} {C|G|A}[device_id(s)] {output_file}" << endl <<
-		"(C: using CPUs, G: using GPUs, A: using accelerators)" << endl <<
+		"Usage: cas-offinder {input_file} C[device_id(s)] {output_file} {pam_scores_file} {cfd_scores_file}" << endl <<
+		"C: using CPUs (only option at the moment)" << endl <<
 		endl <<
 		"Example input file:" << endl <<
 		"/var/chromosomes/human_hg19" << endl <<
 		"NNNNNNNNNNNNNNNNNNNNNRG" << endl <<
-		"GGCCGACCTGTCGCTGACGCNNN 5" << endl <<
-		"CGCCAGCGTCAGCGACAGGTNNN 5" << endl <<
-		"ACGGCGCCAGCGTCAGCGACNNN 5" << endl <<
-		"GTCGCTGACGCTGGCGCCGTNNN 5" << endl <<
+		"GGCCGACCTGTCGCTGACGCNNN 5 0.2" << endl <<
+		"CGCCAGCGTCAGCGACAGGTNNN 5 0.2" << endl <<
+		"ACGGCGCCAGCGTCAGCGACNNN 5 0.2" << endl <<
+		"GTCGCTGACGCTGGCGCCGTNNN 5 0.2" << endl <<
 		endl <<
 		"Available device list:" << endl;
 
