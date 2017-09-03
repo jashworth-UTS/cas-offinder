@@ -601,17 +601,17 @@ void Cas_OFFinder::compareAll(const char* outfilename) {
 					oclEnqueueReadBuffer(m_queues[dev_index], m_sitescorebufs[dev_index], CL_FALSE, 0, sizeof(cl_float)* cnt, m_sitescores[dev_index], 0, 0, 0);
 					oclFinish(m_queues[dev_index]);
 					for (i = 0; i < cnt; i++) {
-						loci = m_mmlocis[dev_index][i] + m_lasttotalanalyzedsize + localanalyzedsize;
-
-						strncpy(strbuf, (char *)(chrdata.c_str() + loci), m_patternlen);
-						if (m_directions[dev_index][i] == '-') set_complementary_sequence((cl_char *)strbuf, m_patternlen);
+						//if (m_mmcounts[dev_index][i] > m_thresholds[compcnt]) continue;
 // this is now done in the OpenCL comparer code
 //						cfdscore = calc_CFD_score((cl_char*)strbuf, (cl_char*)m_compares[compcnt].c_str());
+						if(m_sitescores[dev_index][i] < m_scorethresholds[compcnt] && m_mmcounts[dev_index][i] > 4) continue;
+
+						// output sites passing filters
+						loci = m_mmlocis[dev_index][i] + m_lasttotalanalyzedsize + localanalyzedsize;
+						strncpy(strbuf, (char *)(chrdata.c_str() + loci), m_patternlen);
+						if (m_directions[dev_index][i] == '-') set_complementary_sequence((cl_char *)strbuf, m_patternlen);
 						indicate_mismatches((cl_char*)strbuf, (cl_char*)m_compares[compcnt].c_str());
 						for (j = 0; ((j < chrpos.size()) && (loci >= chrpos[j])); j++) idx = j;
-
-						if(m_sitescores[dev_index][i] < m_scorethresholds[compcnt] && m_mmcounts[dev_index][i] > 4) continue;
-						//if (m_mmcounts[dev_index][i] > m_thresholds[compcnt]) continue;
 
 						(*fo) << m_compares[compcnt]
 							<< '\t' << chrnames[idx]
