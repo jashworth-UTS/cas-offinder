@@ -94,74 +94,137 @@ __kernel void comparer(
 	unsigned int i = get_global_id(0);
 	unsigned int j, lmm_count, old;
 	int k;
+	unsigned short c;
+	float scr;
 
 	unsigned int li = i - get_group_id(0)*get_local_size(0);
 	if (li == 0) {
-        for (k = 0; k < patternlen*2; k++) {
-		    l_comp[k] = comp[k];
-		    l_comp_index[k] = comp_index[k];
-        }
+		for (k = 0; k < patternlen*2; k++) {
+			l_comp[k] = comp[k];
+			l_comp_index[k] = comp_index[k];
+	 	}
 	}
 	barrier(CLK_LOCAL_MEM_FENCE);
 
 	if (flag[i] == 0 || flag[i] == 1) {
-		lmm_count = 0;
-		for (j=0; j<patternlen; j++) {
-			k = l_comp_index[j];
-			if (k == -1) break;
-			if ( (l_comp[k] == 'R' && (chr[loci[i]+k] == 'C' || chr[loci[i]+k] == 'T')) ||
-			     (l_comp[k] == 'Y' && (chr[loci[i]+k] == 'A' || chr[loci[i]+k] == 'G')) ||
-			     (l_comp[k] == 'K' && (chr[loci[i]+k] == 'A' || chr[loci[i]+k] == 'C')) ||
-			     (l_comp[k] == 'M' && (chr[loci[i]+k] == 'G' || chr[loci[i]+k] == 'T')) ||
-			     (l_comp[k] == 'W' && (chr[loci[i]+k] == 'C' || chr[loci[i]+k] == 'G')) ||
-			     (l_comp[k] == 'S' && (chr[loci[i]+k] == 'A' || chr[loci[i]+k] == 'T')) ||
-			     (l_comp[k] == 'H' && (chr[loci[i]+k] == 'G')) ||
-			     (l_comp[k] == 'B' && (chr[loci[i]+k] == 'A')) ||
-			     (l_comp[k] == 'V' && (chr[loci[i]+k] == 'T')) ||
-			     (l_comp[k] == 'D' && (chr[loci[i]+k] == 'C')) ||
-				 (l_comp[k] == 'A' && (chr[loci[i]+k] != 'A')) ||
-			     (l_comp[k] == 'G' && (chr[loci[i]+k] != 'G')) ||
-			     (l_comp[k] == 'C' && (chr[loci[i]+k] != 'C')) ||
-			     (l_comp[k] == 'T' && (chr[loci[i]+k] != 'T'))) {
-				lmm_count++;
-				if (lmm_count > threshold) break;
-			}
+
+		scr = pamscores[ pamscoresind[
+			( (unsigned short)(chr[loci[i]+patternlen-2]) - 65) * 25
+			+ (unsigned short)(chr[loci[i]+patternlen-1]) - 65
+		]];
+
+		for(c=0; c<20; ++c){
+			if(scr<scorethreshold) break;
+			scr *= cfdscores[ cfdscoresind[
+				c * 25 * 25
+				+ ((unsigned short)(comp[c]) - 65) * 25
+				+  (unsigned short)(chr[loci[i]+c]) - 65
+			]];
 		}
-		if (lmm_count <= threshold) {
+
+		if(scr>=scorethreshold){
+
+			lmm_count = 0;
+			for (j=0; j<patternlen; j++) {
+				k = l_comp_index[j];
+				if (k == -1) break;
+				if ( (l_comp[k] == 'R' && (chr[loci[i]+k] == 'C' || chr[loci[i]+k] == 'T')) ||
+						 (l_comp[k] == 'Y' && (chr[loci[i]+k] == 'A' || chr[loci[i]+k] == 'G')) ||
+						 (l_comp[k] == 'K' && (chr[loci[i]+k] == 'A' || chr[loci[i]+k] == 'C')) ||
+						 (l_comp[k] == 'M' && (chr[loci[i]+k] == 'G' || chr[loci[i]+k] == 'T')) ||
+						 (l_comp[k] == 'W' && (chr[loci[i]+k] == 'C' || chr[loci[i]+k] == 'G')) ||
+						 (l_comp[k] == 'S' && (chr[loci[i]+k] == 'A' || chr[loci[i]+k] == 'T')) ||
+						 (l_comp[k] == 'H' && (chr[loci[i]+k] == 'G')) ||
+						 (l_comp[k] == 'B' && (chr[loci[i]+k] == 'A')) ||
+						 (l_comp[k] == 'V' && (chr[loci[i]+k] == 'T')) ||
+						 (l_comp[k] == 'D' && (chr[loci[i]+k] == 'C')) ||
+						 (l_comp[k] == 'A' && (chr[loci[i]+k] != 'A')) ||
+						 (l_comp[k] == 'G' && (chr[loci[i]+k] != 'G')) ||
+						 (l_comp[k] == 'C' && (chr[loci[i]+k] != 'C')) ||
+						 (l_comp[k] == 'T' && (chr[loci[i]+k] != 'T'))) {
+					lmm_count++;
+				}
+			}
 			old = atomic_inc(entrycount);
 			mm_count[old] = lmm_count;
 			direction[old] = '+';
 			mm_loci[old] = loci[i];
+			sitescores[old] = scr;
 		}
 	}
+
 	if (flag[i] == 0 || flag[i] == 2) {
-	    lmm_count = 0;
-		for (j=0; j<patternlen; j++) {
-			k = l_comp_index[patternlen + j];
-			if (k == -1) break;
-			if ( (l_comp[k+patternlen] == 'R' && (chr[loci[i]+k] == 'C' || chr[loci[i]+k] == 'T')) ||
-			     (l_comp[k+patternlen] == 'Y' && (chr[loci[i]+k] == 'A' || chr[loci[i]+k] == 'G')) ||
-			     (l_comp[k+patternlen] == 'K' && (chr[loci[i]+k] == 'A' || chr[loci[i]+k] == 'C')) ||
-			     (l_comp[k+patternlen] == 'M' && (chr[loci[i]+k] == 'G' || chr[loci[i]+k] == 'T')) ||
-			     (l_comp[k+patternlen] == 'W' && (chr[loci[i]+k] == 'C' || chr[loci[i]+k] == 'G')) ||
-			     (l_comp[k+patternlen] == 'S' && (chr[loci[i]+k] == 'A' || chr[loci[i]+k] == 'T')) ||
-			     (l_comp[k+patternlen] == 'H' && (chr[loci[i]+k] == 'G')) ||
-			     (l_comp[k+patternlen] == 'B' && (chr[loci[i]+k] == 'A')) ||
-			     (l_comp[k+patternlen] == 'V' && (chr[loci[i]+k] == 'T')) ||
-			     (l_comp[k+patternlen] == 'D' && (chr[loci[i]+k] == 'C')) ||
-			     (l_comp[k+patternlen] == 'A' && (chr[loci[i]+k] != 'A')) ||
-			     (l_comp[k+patternlen] == 'G' && (chr[loci[i]+k] != 'G')) ||
-			     (l_comp[k+patternlen] == 'C' && (chr[loci[i]+k] != 'C')) ||
-				 (l_comp[k+patternlen] == 'T' && (chr[loci[i]+k] != 'T'))) {
-				lmm_count++;
-				if (lmm_count > threshold) break;
-            }
+
+		unsigned char pa, pb;
+		switch( chr[loci[i]+1] ){
+			case 'A': pa='T'; break;
+			case 'C': pa='G'; break;
+			case 'G': pa='C'; break;
+			case 'T': pa='A'; break;
 		}
-		if (lmm_count <= threshold) {
+		switch( chr[loci[i]] ){
+			case 'A': pb='T'; break;
+			case 'C': pb='G'; break;
+			case 'G': pb='C'; break;
+			case 'T': pb='A'; break;
+		}
+		scr = pamscores[ pamscoresind[
+			( (unsigned short)(pa) - 65) * 25
+			+ (unsigned short)(pb) - 65
+		]];
+
+		for(c=0; c<20; ++c){
+			if(scr<scorethreshold) break;
+			k = patternlen-c-1;
+			int k2 = comp_index[patternlen + c];
+
+			switch( comp[patternlen+k] ){
+				case 'A': pa='T'; break;
+				case 'C': pa='G'; break;
+				case 'G': pa='C'; break;
+				case 'T': pa='A'; break;
+			}
+			switch( chr[loci[i]+k] ){
+				case 'A': pb='T'; break;
+				case 'C': pb='G'; break;
+				case 'G': pb='C'; break;
+				case 'T': pb='A'; break;
+			}
+
+			scr *= cfdscores[ cfdscoresind[
+				c * 25 * 25
+				+ ((unsigned short)(pa) - 65) * 25
+				+  (unsigned short)(pb) - 65
+			]];
+		}
+
+		if(scr >= scorethreshold){
+			lmm_count = 0;
+			for (j=0; j<patternlen; j++) {
+				k = l_comp_index[patternlen + j];
+				if (k == -1) break;
+				if ( (l_comp[k+patternlen] == 'R' && (chr[loci[i]+k] == 'C' || chr[loci[i]+k] == 'T')) ||
+						 (l_comp[k+patternlen] == 'Y' && (chr[loci[i]+k] == 'A' || chr[loci[i]+k] == 'G')) ||
+						 (l_comp[k+patternlen] == 'K' && (chr[loci[i]+k] == 'A' || chr[loci[i]+k] == 'C')) ||
+						 (l_comp[k+patternlen] == 'M' && (chr[loci[i]+k] == 'G' || chr[loci[i]+k] == 'T')) ||
+						 (l_comp[k+patternlen] == 'W' && (chr[loci[i]+k] == 'C' || chr[loci[i]+k] == 'G')) ||
+						 (l_comp[k+patternlen] == 'S' && (chr[loci[i]+k] == 'A' || chr[loci[i]+k] == 'T')) ||
+						 (l_comp[k+patternlen] == 'H' && (chr[loci[i]+k] == 'G')) ||
+						 (l_comp[k+patternlen] == 'B' && (chr[loci[i]+k] == 'A')) ||
+						 (l_comp[k+patternlen] == 'V' && (chr[loci[i]+k] == 'T')) ||
+						 (l_comp[k+patternlen] == 'D' && (chr[loci[i]+k] == 'C')) ||
+						 (l_comp[k+patternlen] == 'A' && (chr[loci[i]+k] != 'A')) ||
+						 (l_comp[k+patternlen] == 'G' && (chr[loci[i]+k] != 'G')) ||
+						 (l_comp[k+patternlen] == 'C' && (chr[loci[i]+k] != 'C')) ||
+					 (l_comp[k+patternlen] == 'T' && (chr[loci[i]+k] != 'T'))) {
+					lmm_count++;
+				}
+			}
 			old = atomic_inc(entrycount);
 			mm_count[old] = lmm_count;
 			direction[old] = '-';
 			mm_loci[old] = loci[i];
+			sitescores[old] = scr;
 		}
 	}
 }

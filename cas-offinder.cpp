@@ -106,8 +106,8 @@ void Cas_OFFinder::initOpenCL(vector<int> dev_ids) {
 		    m_finderkernels.push_back(oclCreateKernel(program, "finder_cpu"));
 		    m_comparerkernels.push_back(oclCreateKernel(program, "comparer_cpu"));
         } else {
-						cerr << "WARNING -OOPS- CFD scoring version of CasOFFinder only implemented for CPUs so far!!" << endl;
-						exit(1);
+//						cerr << "WARNING -OOPS- CFD scoring version of CasOFFinder only implemented for CPUs so far!!" << endl;
+//						exit(1);
             m_finderkernels.push_back(oclCreateKernel(program, "finder"));
             m_comparerkernels.push_back(oclCreateKernel(program, "comparer"));
         }

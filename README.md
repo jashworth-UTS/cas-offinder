@@ -5,7 +5,6 @@ Note (Justin Ashworth 2017):
 This is an upgraded variant of Cas-OFFinder which implements the CFD scoring matrix of Doench et al. 2016 (doi:10.1038/nbt.3437) in a tricky but very fast way to perform 'ultrafast' CFD-based site screening with much higher mismatch limits. The CFD speed-up I've painstakingly added here seems to be about 50-fold faster for high-mismatch searches (8 to 16 :) for several hundred sites (CFD scoring cutoff of 0.2 as suggested by the paper)
 
 This only supports Cas9-based searches using 20bp crRNA + 3bp PAM sites right now
-This does not currently support anything but CPU devices
 
 Two scoring files are included from Doench et al. 2016: pam_scores.tsv and cfd_mismatch_scores.tsv. These should be supplied as arguments.
 There is also an example of an altered targetsites file which includes a column for CFD scoring thresholds.
